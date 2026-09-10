@@ -1,1 +1,60 @@
-/**\n * Background Service Worker\n * Handles coupon fetching and processing\n */\n\nchrome.runtime.onMessage.addListener((request, sender, sendResponse) => {\n  if (request.action === 'fetchCoupons') {\n    handleCouponFetch(request)\n      .then(coupons => sendResponse(coupons))\n      .catch(error => sendResponse({ error: error.message }));\n    return true;\n  }\n});\n\nasync function handleCouponFetch(request) {\n  const { domain, url, aiProvider } = request;\n  \n  console.log(`[Background] Fetching coupons for: ${domain}`);\n  \n  try {\n    // Generate search query\n    const query = generateSearchQuery(domain);\n    \n    // Fetch from selected provider\n    let results = [];\n    if (aiProvider === 'google') {\n      results = await fetchFromGoogle(query);\n    } else if (aiProvider === 'bing') {\n      results = await fetchFromBing(query);\n    } else if (aiProvider === 'duckduckgo') {\n      results = await fetchFromDuckDuckGo(query);\n    } else {\n      results = await fetchFromGoogle(query); // Default to Google\n    }\n    \n    // Parse and validate results\n    const coupons = parseCoupons(results, domain);\n    \n    console.log(`[Background] Found ${coupons.length} coupons`);\n    return coupons;\n  } catch (error) {\n    console.error('[Background] Error:', error);\n    throw new Error(`Failed to fetch coupons: ${error.message}`);\n  }\n}\n\nfunction generateSearchQuery(domain) {\n  const cleanDomain = domain\n    .replace('www.', '')\n    .split('.')[0]\n    .toLowerCase();\n  \n  return `${cleanDomain} coupon codes promo ${new Date().getFullYear()}`;\n}\n\nasync function fetchFromGoogle(query) {\n  try {\n    const encodedQuery = encodeURIComponent(query);\n    const response = await fetch(\n      `https://www.google.com/search?q=${encodedQuery}`,\n      {\n        headers: {\n          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'\n        }\n      }\n    );\n    \n    if (!response.ok) return [];\n    return [{ title: query, snippet: 'Google search results' }];\n  } catch (error) {\n    console.error('[Background] Google fetch error:', error);\n    return [];\n  }\n}\n\nasync function fetchFromBing(query) {\n  try {\n    const encodedQuery = encodeURIComponent(query);\n    const response = await fetch(\n      `https://www.bing.com/search?q=${encodedQuery}`,\n      {\n        headers: {\n          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'\n        }\n      }\n    );\n    \n    if (!response.ok) return [];\n    return [{ title: query, snippet: 'Bing search results' }];\n  } catch (error) {\n    console.error('[Background] Bing fetch error:', error);\n    return [];\n  }\n}\n\nasync function fetchFromDuckDuckGo(query) {\n  try {\n    const encodedQuery = encodeURIComponent(query);\n    const response = await fetch(\n      `https://html.duckduckgo.com/?q=${encodedQuery}`,\n      {\n        headers: {\n          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'\n        }\n      }\n    );\n    \n    if (!response.ok) return [];\n    return [{ title: query, snippet: 'DuckDuckGo search results' }];\n  } catch (error) {\n    console.error('[Background] DuckDuckGo fetch error:', error);\n    return [];\n  }\n}\n\nfunction parseCoupons(results, domain) {\n  // Sample coupons for demo (in production, parse from results)\n  const sampleCoupons = [\n    {\n      code: 'SAVE20',\n      discount: '20% OFF',\n      description: 'Save 20% on your order - Limited time offer',\n      conditions: ['Min. purchase 100K', 'New users only'],\n      link: 'https://example.com/coupon/save20',\n      expiryDate: '2024-12-31'\n    },\n    {\n      code: 'FREESHIP',\n      discount: 'FREE SHIPPING',\n      description: 'Free shipping on all orders above minimum purchase',\n      conditions: ['Min. purchase 50K', 'Limited time'],\n      link: 'https://example.com/coupon/freeship',\n      expiryDate: '2024-12-25'\n    },\n    {\n      code: 'WELCOME50',\n      discount: '50K OFF',\n      description: 'Welcome discount for new users on first order',\n      conditions: ['New users only', 'First order only'],\n      link: 'https://example.com/coupon/welcome50',\n      expiryDate: '2024-12-30'\n    },\n    {\n      code: 'SUMMER25',\n      discount: '25% OFF',\n      description: 'Summer sale - Save 25% on selected items',\n      conditions: ['Selected items only', 'Limited time'],\n      link: 'https://example.com/coupon/summer25',\n      expiryDate: '2024-12-28'\n    },\n    {\n      code: 'FLASH10',\n      discount: '10K OFF',\n      description: 'Flash sale discount on fashion category',\n      conditions: ['Fashion category', 'Min. purchase 75K'],\n      link: 'https://example.com/coupon/flash10',\n      expiryDate: '2024-12-20'\n    }\n  ];\n  \n  return sampleCoupons;\n}\n
+/**
+ * Background Service Worker
+ * Handles coupon fetching and processing
+ */
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'fetchCoupons') {
+    // Return coupons immediately (synchronously)
+    const coupons = getCouponData();
+    sendResponse(coupons);
+  }
+});
+
+function getCouponData() {
+  // Return demo coupons immediately - no async/await
+  return [
+    {
+      code: 'SAVE20',
+      discount: '20% OFF',
+      description: 'Save 20% on your order - Limited time offer',
+      conditions: ['Min. purchase 100K', 'New users only'],
+      link: 'https://example.com/coupon/save20',
+      expiryDate: '2024-12-31'
+    },
+    {
+      code: 'FREESHIP',
+      discount: 'FREE SHIPPING',
+      description: 'Free shipping on all orders above minimum purchase',
+      conditions: ['Min. purchase 50K', 'Limited time'],
+      link: 'https://example.com/coupon/freeship',
+      expiryDate: '2024-12-25'
+    },
+    {
+      code: 'WELCOME50',
+      discount: '50K OFF',
+      description: 'Welcome discount for new users on first order',
+      conditions: ['New users only', 'First order only'],
+      link: 'https://example.com/coupon/welcome50',
+      expiryDate: '2024-12-30'
+    },
+    {
+      code: 'SUMMER25',
+      discount: '25% OFF',
+      description: 'Summer sale - Save 25% on selected items',
+      conditions: ['Selected items only', 'Limited time'],
+      link: 'https://example.com/coupon/summer25',
+      expiryDate: '2024-12-28'
+    },
+    {
+      code: 'FLASH10',
+      discount: '10K OFF',
+      description: 'Flash sale discount on fashion category',
+      conditions: ['Fashion category', 'Min. purchase 75K'],
+      link: 'https://example.com/coupon/flash10',
+      expiryDate: '2024-12-20'
+    }
+  ];
+}
+
+console.log('[Background] Service worker loaded and ready');
