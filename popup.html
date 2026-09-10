@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Coupon Finder</title>
+    <link rel="stylesheet" href="styles/popup.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>💳 Coupon Finder</h1>
+            <div class="header-actions">
+                <button id="settingsBtn" class="icon-btn" title="Settings">
+                    ⚙️
+                </button>
+            </div>
+        </div>
+
+        <!-- Website Info -->
+        <div class="website-info" id="websiteInfo">
+            <span class="website-name" id="websiteName">Loading...</span>
+            <span class="website-status" id="websiteStatus"></span>
+        </div>
+
+        <!-- Search/Loading State -->
+        <div class="search-state" id="searchState" style="display: none;">
+            <div class="spinner"></div>
+            <p>Searching for coupons...</p>
+        </div>
+
+        <!-- Coupons List -->
+        <div class="coupons-container" id="couponsContainer" style="display: none;">
+            <div class="coupons-list" id="couponsList"></div>
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="emptyState" style="display: none;">
+            <p>🔍 No coupons found</p>
+            <small>Try refreshing or check back later</small>
+        </div>
+
+        <!-- Error State -->
+        <div class="error-state" id="errorState" style="display: none;">
+            <p id="errorMessage">An error occurred</p>
+            <button id="retryBtn" class="btn-primary">Retry</button>
+        </div>
+
+        <!-- Action Button -->
+        <div class="action-bar">
+            <button id="searchBtn" class="btn-primary btn-large">🔍 Search for Coupons</button>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="close-btn" id="closeSettingsBtn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-item">
+                    <label for="aiProviderSelect">AI Provider:</label>
+                    <select id="aiProviderSelect">
+                        <option value="google">Google Search</option>
+                        <option value="bing">Bing Search</option>
+                        <option value="duckduckgo">DuckDuckGo</option>
+                        <option value="local">Local AI (Ollama)</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label for="ollamaUrlInput">Ollama URL (if using Local AI):</label>
+                    <input type="text" id="ollamaUrlInput" placeholder="http://localhost:11434">
+                </div>
+                <div class="setting-item">
+                    <label for="cacheToggle">
+                        <input type="checkbox" id="cacheToggle" checked>
+                        Enable Coupon Caching (24h)
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label for="autoSearchToggle">
+                        <input type="checkbox" id="autoSearchToggle">
+                        Auto-search when opening extension
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="saveSettingsBtn" class="btn-primary">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="scripts/popup.js"></script>
+</body>
+</html>
