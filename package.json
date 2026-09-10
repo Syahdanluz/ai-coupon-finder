@@ -1,0 +1,32 @@
+{
+  "name": "ai-coupon-finder",
+  "version": "1.0.0",
+  "description": "AI-powered browser extension to find available coupons on e-commerce websites without switching tabs",
+  "main": "scripts/background.js",
+  "scripts": {
+    "dev": "echo 'Load unpacked in Chrome extensions page'",
+    "test": "echo 'Add tests here'",
+    "build": "echo 'Build process would go here'",
+    "lint": "echo 'Add linter configuration'"
+  },
+  "keywords": [
+    "coupon",
+    "discount",
+    "promo",
+    "ecommerce",
+    "browser-extension",
+    "chrome-extension",
+    "ai",
+    "shopping"
+  ],
+  "author": "AI Coupon Finder Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Syahdanluz/ai-coupon-finder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Syahdanluz/ai-coupon-finder/issues"
+  },
+  "homepage": "https://github.com/Syahdanluz/ai-coupon-finder#readme"
+}
