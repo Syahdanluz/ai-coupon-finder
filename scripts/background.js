@@ -1,435 +1,291 @@
 /**
  * Background Service Worker
- * Fetches REAL coupons from multiple sources including Cuponation.co.id
+ * Focuses on fetching coupons directly from Cuponation.co.id store pages
  */
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'fetchCoupons') {
-    fetchRealCoupons(request.domain, request.url)
-      .then(coupons => sendResponse(coupons))
-      .catch(error => sendResponse({ error: error.message }));
-    return true; // Keep channel open for async
+    fetchCuponationCoupons(request.domain)
+      .then(coupons => {
+        console.log(`[Background] Sending ${coupons.length} coupons`);
+        sendResponse(coupons);
+      })
+      .catch(error => {
+        console.error('[Background] Error:', error);
+        sendResponse({ error: error.message });
+      });
+    return true;
   }
 });
 
-async function fetchRealCoupons(domain, url) {
+async function fetchCuponationCoupons(domain) {
   try {
-    console.log(`[Background] Fetching real coupons for: ${domain}`);
+    console.log(`[Background] Fetching coupons from Cuponation for: ${domain}`);
     
-    // Generate search query
-    const cleanDomain = domain.replace('www.', '').split('.')[0];
-    const searchQuery = `${cleanDomain} coupon codes ${new Date().getFullYear()}`;
+    // Extract store name from domain
+    const storeName = getStoreName(domain);
+    console.log(`[Background] Store name: ${storeName}`);
     
-    // Fetch from multiple sources
-    const coupons = await searchForCoupons(searchQuery, cleanDomain, domain);
-    
-    return coupons;
-  } catch (error) {
-    console.error('[Background] Error:', error);
-    return [];
-  }
-}
-
-async function searchForCoupons(query, cleanDomain, fullDomain) {
-  try {
-    // Try all sources in parallel for speed
-    const sources = await Promise.all([
-      tryCuponationID(cleanDomain),
-      tryRetailMeNot(fullDomain),
-      tryCouponDatabases(cleanDomain),
-      searchWeb(query)
-    ]);
-    
-    // Combine and deduplicate results
-    let allCoupons = sources.flat();
-    
-    // Remove duplicates
-    const uniqueCoupons = [];
-    const seen = new Set();
-    
-    allCoupons.forEach(coupon => {
-      if (!seen.has(coupon.code)) {
-        seen.add(coupon.code);
-        uniqueCoupons.push(coupon);
-      }
-    });
-    
-    return uniqueCoupons.slice(0, 10); // Return top 10
-  } catch (error) {
-    console.error('[Background] Search error:', error);
-    return [];
-  }
-}
-
-async function tryCuponationID(domain) {
-  try {
-    console.log(`[Background] Fetching from Cuponation.co.id for: ${domain}`);
-    
-    // Cuponation.co.id search - try multiple approaches
-    const coupons = [];
-    
-    // Approach 1: Direct fetch from Cuponation store page
-    try {
-      const storeResponse = await fetch(
-        `https://www.cuponation.co.id/search?q=${domain}`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          },
-          signal: AbortSignal.timeout(4000)
-        }
-      );
-      
-      if (storeResponse.ok) {
-        const html = await storeResponse.text();
-        const cuponationCoupons = parseCuponationPage(html, domain);
-        coupons.push(...cuponationCoupons);
-        console.log(`[Background] Found ${cuponationCoupons.length} coupons from Cuponation`);
-      }
-    } catch (err) {
-      console.error('[Background] Cuponation fetch error:', err);
+    if (!storeName) {
+      throw new Error('Could not identify store');
     }
     
-    // Approach 2: Try Cuponation store directory
-    try {
-      const directoryResponse = await fetch(
-        `https://www.cuponation.co.id/stores`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          },
-          signal: AbortSignal.timeout(3000)
-        }
-      );
-      
-      if (directoryResponse.ok) {
-        const html = await directoryResponse.text();
-        // Look for store matching domain
-        if (html.includes(domain)) {
-          const storeCoupons = parseStoreDirectory(html, domain);
-          coupons.push(...storeCoupons);
-          console.log(`[Background] Found ${storeCoupons.length} from store directory`);
-        }
-      }
-    } catch (err) {
-      console.error('[Background] Cuponation directory error:', err);
-    }
-    
-    return coupons;
-  } catch (error) {
-    console.error('[Background] Cuponation error:', error);
-    return [];
-  }
-}
-
-function parseCuponationPage(html, domain) {
-  try {
-    const coupons = [];
-    const parser = new DOMParser();
-    
-    try {
-      const doc = parser.parseFromString(html, 'text/html');
-      
-      // Look for coupon elements on Cuponation pages
-      const couponElements = doc.querySelectorAll('[class*="coupon"], [class*="offer"], [class*="code"]');
-      
-      couponElements.forEach(element => {
-        const text = element.textContent || '';
-        const link = element.querySelector('a')?.getAttribute('href') || '';
-        
-        // Extract coupon code (usually all caps, 4-20 chars)
-        const codeMatch = text.match(/([A-Z0-9]{4,20})/);
-        if (codeMatch) {
-          const code = codeMatch[1];
-          const discount = extractDiscount(text);
-          const description = text.substring(0, 150).trim();
-          
-          coupons.push({
-            code: code,
-            discount: discount,
-            description: description,
-            conditions: extractConditions(text),
-            link: link || `https://www.cuponation.co.id/search?q=${domain}`,
-            expiryDate: '',
-            source: 'Cuponation.co.id'
-          });
-        }
-      });
-    } catch (parseErr) {
-      console.error('[Background] DOM parse error:', parseErr);
-    }
-    
-    // Also try regex-based parsing for robustness
-    const codeRegex = /\b([A-Z0-9]{4,20})\b/g;
-    const matches = html.match(codeRegex) || [];
-    
-    matches.forEach(code => {
-      if (!coupons.some(c => c.code === code)) {
-        const contextMatch = html.match(new RegExp(`.{0,100}${code}.{0,100}`, 'i'));
-        const context = contextMatch ? contextMatch[0] : code;
-        
-        coupons.push({
-          code: code,
-          discount: extractDiscount(context),
-          description: context.substring(0, 150),
-          conditions: extractConditions(context),
-          link: `https://www.cuponation.co.id/search?q=${code}`,
-          expiryDate: '',
-          source: 'Cuponation.co.id'
-        });
-      }
-    });
-    
-    return coupons.slice(0, 5);
-  } catch (error) {
-    console.error('[Background] Cuponation parse error:', error);
-    return [];
-  }
-}
-
-function parseStoreDirectory(html, domain) {
-  try {
-    const coupons = [];
-    const parser = new DOMParser();
-    
-    try {
-      const doc = parser.parseFromString(html, 'text/html');
-      
-      // Find store link
-      const storeLinks = doc.querySelectorAll('a');
-      let storeUrl = null;
-      
-      storeLinks.forEach(link => {
-        const href = link.getAttribute('href') || '';
-        const text = link.textContent || '';
-        
-        if (text.toLowerCase().includes(domain) || href.includes(domain)) {
-          storeUrl = href;
-        }
-      });
-      
-      if (storeUrl) {
-        return [{
-          code: 'VISIT_STORE',
-          discount: 'Check Store',
-          description: `Visit ${domain} on Cuponation for latest offers`,
-          conditions: ['Visit Cuponation for more'],
-          link: storeUrl,
-          expiryDate: '',
-          source: 'Cuponation.co.id'
-        }];
-      }
-    } catch (parseErr) {
-      console.error('[Background] Store parse error:', parseErr);
-    }
-    
-    return coupons;
-  } catch (error) {
-    console.error('[Background] Store directory parse error:', error);
-    return [];
-  }
-}
-
-async function tryRetailMeNot(domain) {
-  try {
-    const response = await fetch(
-      `https://www.retailmenot.com/api/v2/stores?name=${domain}`,
-      { signal: AbortSignal.timeout(3000) }
-    );
-    
-    if (!response.ok) return [];
-    
-    const data = await response.json();
-    const coupons = [];
-    
-    if (data.stores && data.stores.length > 0) {
-      const store = data.stores[0];
-      const couponResponse = await fetch(
-        `https://www.retailmenot.com/api/v2/stores/${store.id}/offers`,
-        { signal: AbortSignal.timeout(3000) }
-      );
-      
-      if (couponResponse.ok) {
-        const couponData = await couponResponse.json();
-        couponData.offers?.slice(0, 5).forEach(offer => {
-          if (offer.code || offer.title) {
-            coupons.push({
-              code: offer.code || offer.title.split(' ')[0],
-              discount: extractDiscount(offer.title),
-              description: offer.title || '',
-              conditions: [offer.description || 'Check coupon page for details'],
-              link: `https://www.retailmenot.com${offer.url}`,
-              expiryDate: offer.endDate || '',
-              source: 'RetailMeNot'
-            });
-          }
-        });
-      }
-    }
-    
-    return coupons;
-  } catch (error) {
-    console.error('[Background] RetailMeNot error:', error);
-    return [];
-  }
-}
-
-async function tryCouponDatabases(domain) {
-  try {
-    // Try multiple coupon API endpoints
-    const endpoints = [
-      `https://api.coupon.com/search?merchant=${domain}&limit=5`,
-      `https://api.slickdeals.net/api/deals?store=${domain}&sort=popularity`,
-      `https://www.dealspotr.com/api/stores/${domain}/deals`
+    // Try multiple Cuponation URL patterns
+    const urls = [
+      `https://www.cuponation.co.id/${storeName}-kupon`,
+      `https://www.cuponation.co.id/${storeName}-kode-promo`,
+      `https://www.cuponation.co.id/${storeName}`,
+      `https://www.cuponation.co.id/search?q=${storeName}`
     ];
     
-    const coupons = [];
+    let coupons = [];
     
-    for (const endpoint of endpoints) {
+    for (const url of urls) {
       try {
-        const response = await fetch(endpoint, {
-          signal: AbortSignal.timeout(2000)
-        });
-        
-        if (!response.ok) continue;
-        
-        const data = await response.json();
-        
-        // Parse based on endpoint type
-        if (data.coupons) {
-          data.coupons.forEach(coupon => {
-            if (coupon.code) {
-              coupons.push({
-                code: coupon.code,
-                discount: coupon.discount || 'Special Offer',
-                description: coupon.description || coupon.title,
-                conditions: coupon.restrictions || [],
-                link: coupon.offerUrl || '',
-                expiryDate: coupon.expirationDate || '',
-                source: 'Coupon Database'
-              });
-            }
-          });
+        console.log(`[Background] Trying URL: ${url}`);
+        const fetchedCoupons = await fetchAndParseCuponation(url);
+        if (fetchedCoupons && fetchedCoupons.length > 0) {
+          coupons = fetchedCoupons;
+          console.log(`[Background] Found ${coupons.length} coupons from ${url}`);
+          break;
         }
       } catch (err) {
-        console.error(`[Background] Endpoint ${endpoint} error:`, err);
+        console.error(`[Background] Error fetching ${url}:`, err);
+        continue;
       }
+    }
+    
+    if (coupons.length === 0) {
+      console.warn(`[Background] No coupons found for ${storeName}`);
     }
     
     return coupons;
   } catch (error) {
-    console.error('[Background] Coupon databases error:', error);
-    return [];
+    console.error('[Background] Fatal error:', error);
+    throw error;
   }
 }
 
-async function searchWeb(query) {
+async function fetchAndParseCuponation(url) {
   try {
-    const encodedQuery = encodeURIComponent(query);
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'id-ID,id;q=0.9,en;q=0.8',
+        'Referer': 'https://www.cuponation.co.id/'
+      },
+      signal: AbortSignal.timeout(8000)
+    });
     
-    // Search on Bing which is more lenient for web scraping
-    const response = await fetch(
-      `https://www.bing.com/search?q=${encodedQuery}`,
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        },
-        signal: AbortSignal.timeout(5000)
-      }
-    );
-    
-    if (!response.ok) return [];
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
     
     const html = await response.text();
-    const coupons = parseSearchResults(html);
+    const coupons = parseCuponationHTML(html);
     
     return coupons;
   } catch (error) {
-    console.error('[Background] Web search error:', error);
+    console.error('[Background] Fetch/parse error:', error);
     return [];
   }
 }
 
-function parseSearchResults(html) {
+function parseCuponationHTML(html) {
   try {
     const coupons = [];
     
-    // Regex-based parsing (more reliable than DOM for fetched content)
-    const codeRegex = /\b([A-Z0-9]{4,20})\b/g;
-    const codes = html.match(codeRegex) || [];
+    // Use regex to find coupon sections
+    // Cuponation typically uses specific HTML patterns
     
-    // Get unique codes
-    const uniqueCodes = [...new Set(codes)];
+    // Pattern 1: Look for coupon code boxes
+    const codePattern = /(?:kode|code)[\s:]*([A-Z0-9]{3,20})/gi;
+    const codeMatches = html.matchAll(codePattern);
     
-    uniqueCodes.slice(0, 5).forEach(code => {
+    for (const match of codeMatches) {
+      const code = match[1];
+      if (!code || code.length < 3) continue;
+      
       // Find context around the code
-      const contextMatch = html.match(new RegExp(`.{0,100}${code}.{0,100}`, 'i'));
-      const context = contextMatch ? contextMatch[0] : code;
+      const startIdx = Math.max(0, match.index - 200);
+      const endIdx = Math.min(html.length, match.index + 300);
+      const context = html.substring(startIdx, endIdx);
+      
+      // Extract discount info
+      const discount = extractDiscountFromContext(context);
+      const description = extractDescriptionFromContext(context);
+      
+      coupons.push({
+        code: code.toUpperCase(),
+        discount: discount,
+        description: description || 'Visit Cuponation for details',
+        conditions: [],
+        link: match.index > -1 ? html.substring(0, match.index).split('<a href="').pop()?.split('"')[0] || 'https://www.cuponation.co.id' : 'https://www.cuponation.co.id',
+        expiryDate: '',
+        source: 'Cuponation.co.id'
+      });
+    }
+    
+    // Pattern 2: Look for coupon cards/sections
+    const cardPattern = /<div[^>]*class="[^"]*(?:coupon|offer|promo)[^"]*"[^>]*>([\s\S]{0,500}?)<\/div>/gi;
+    const cardMatches = html.matchAll(cardPattern);
+    
+    for (const match of cardMatches) {
+      const cardContent = match[1];
+      
+      // Look for code in this card
+      const codeInCard = cardContent.match(/\b([A-Z0-9]{4,20})\b/);
+      if (!codeInCard) continue;
+      
+      const code = codeInCard[1];
+      if (coupons.some(c => c.code === code)) continue;
+      
+      const discount = extractDiscountFromContext(cardContent);
+      const description = stripHTML(cardContent).substring(0, 150);
       
       coupons.push({
         code: code,
-        discount: extractDiscount(context),
-        description: context.substring(0, 150).trim(),
-        conditions: extractConditions(context),
-        link: `https://www.bing.com/search?q=${code}`,
+        discount: discount || 'Special Offer',
+        description: description,
+        conditions: [],
+        link: 'https://www.cuponation.co.id',
         expiryDate: '',
-        source: 'Web Search'
+        source: 'Cuponation.co.id'
       });
+    }
+    
+    // Pattern 3: Direct text parsing
+    const lines = html.split('\n');
+    let currentDiscount = '';
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Look for discount info
+      if (line.match(/(\d+%|diskon|potongan|gratis)/i)) {
+        currentDiscount = line.trim();
+      }
+      
+      // Look for coupon code
+      const codeMatch = line.match(/\b([A-Z0-9]{4,20})\b/);
+      if (codeMatch && !coupons.some(c => c.code === codeMatch[1])) {
+        const code = codeMatch[1];
+        
+        coupons.push({
+          code: code,
+          discount: currentDiscount || 'Special Offer',
+          description: stripHTML(line).substring(0, 150),
+          conditions: [],
+          link: 'https://www.cuponation.co.id',
+          expiryDate: '',
+          source: 'Cuponation.co.id'
+        });
+      }
+    }
+    
+    // Remove duplicates and invalid entries
+    const uniqueCoupons = [];
+    const seen = new Set();
+    
+    coupons.forEach(coupon => {
+      if (coupon.code && coupon.code.length >= 3 && !seen.has(coupon.code)) {
+        seen.add(coupon.code);
+        // Filter out obvious non-coupons
+        if (!isInvalidCode(coupon.code)) {
+          uniqueCoupons.push(coupon);
+        }
+      }
     });
     
-    return coupons;
+    console.log(`[Background] Parsed ${uniqueCoupons.length} unique coupons`);
+    return uniqueCoupons.slice(0, 10); // Return top 10
   } catch (error) {
     console.error('[Background] Parse error:', error);
     return [];
   }
 }
 
-function extractDiscount(text) {
-  if (!text) return 'Special Offer';
+function getStoreName(domain) {
+  try {
+    // Extract store name from domain
+    // www.traveloka.com -> traveloka
+    // traveloka.co.id -> traveloka
+    
+    let cleanDomain = domain.replace('www.', '').toLowerCase();
+    
+    // Remove TLD and country code
+    const parts = cleanDomain.split('.');
+    const storeName = parts[0];
+    
+    if (!storeName || storeName.length < 2) {
+      return null;
+    }
+    
+    return storeName;
+  } catch (error) {
+    console.error('[Background] getStoreName error:', error);
+    return null;
+  }
+}
+
+function extractDiscountFromContext(context) {
+  if (!context) return 'Special Offer';
   
   // Look for percentage
-  const percentMatch = text.match(/([\d]+)%\s*off/i);
+  const percentMatch = context.match(/(\d{1,3})%/);
   if (percentMatch) return `${percentMatch[1]}% OFF`;
   
-  // Look for currency amounts
-  const amountMatch = text.match(/(?:save|off)?\s*(?:\$|Rp|₹|€|£)([\d,]+)/i);
-  if (amountMatch) return `Save ${amountMatch[1]}`;
+  // Look for rupiah amount
+  const rupiahMatch = context.match(/Rp[\s]?([\d.,]+)/i);
+  if (rupiahMatch) return `Save Rp ${rupiahMatch[1]}`;
   
-  // Look for free shipping
-  if (text.match(/free\s+(?:shipping|delivery|ongkir)/i)) return 'FREE SHIPPING';
+  // Look for "gratis" (free)
+  if (context.match(/gratis|free/i)) {
+    if (context.match(/ongkir|shipping/i)) {
+      return 'FREE SHIPPING';
+    }
+    return 'FREE';
+  }
   
-  // Look for buy X get Y
-  const buyGetMatch = text.match(/(buy\s+\d+\s+get\s+\d+)/i);
-  if (buyGetMatch) return buyGetMatch[1].toUpperCase();
+  // Look for "diskon" (discount)
+  const discountMatch = context.match(/diskon[\s:]*([^<\n]*)/i);
+  if (discountMatch) return discountMatch[1].trim().substring(0, 30);
   
   return 'Special Offer';
 }
 
-function extractConditions(text) {
-  if (!text) return [];
+function extractDescriptionFromContext(context) {
+  if (!context) return '';
   
-  const conditions = [];
+  // Remove HTML tags
+  const text = stripHTML(context);
   
-  // Minimum purchase
-  const minMatch = text.match(/min(?:imum)?(?:\s+purchase)?:?\s*(?:\$|Rp|€)?[\s]*([\d,]+)/i);
-  if (minMatch) conditions.push(`Min. purchase ${minMatch[1]}`);
+  // Get first meaningful sentence
+  const sentences = text.split(/[.!?]/);
+  const description = sentences.find(s => s.trim().length > 10);
   
-  // New users
-  if (text.match(/(?:new\s+(?:customer|user|member)|first\s+order)/i)) {
-    conditions.push('New users only');
-  }
-  
-  // Limited time
-  if (text.match(/(?:limited\s+time|while\s+stock|ends?|expires?)/i)) {
-    conditions.push('Limited time');
-  }
-  
-  // Specific items
-  if (text.match(/(?:selected|specific|certain|participating)/i)) {
-    conditions.push('Selected items only');
-  }
-  
-  return [...new Set(conditions)];
+  return description ? description.trim().substring(0, 150) : text.substring(0, 150);
 }
 
-console.log('[Background] Service worker loaded - fetching from Cuponation, RetailMeNot, and web search');
+function stripHTML(html) {
+  try {
+    return html
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ')
+      .trim();
+  } catch (error) {
+    return html;
+  }
+}
+
+function isInvalidCode(code) {
+  // Filter out common invalid patterns
+  const invalid = ['DOCTYPE', 'HTML', 'BODY', 'CLASS', 'STYLE', 'SCRIPT', 'DIV', 'SPAN', 'CHARSET', 'META', 'HREF', 'HTTP'];
+  return invalid.includes(code.toUpperCase());
+}
+
+console.log('[Background] Service worker loaded - Cuponation.co.id focused');
