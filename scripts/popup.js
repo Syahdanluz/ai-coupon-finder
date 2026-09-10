@@ -19,27 +19,24 @@ let currentUrl = '';
 let currentDomain = '';
 
 // Initialize
-document.addEventListener('DOMContentLoaded', async () => {
-  await initializePopup();
+document.addEventListener('DOMContentLoaded', () => {
+  initializePopup();
   setupEventListeners();
   loadSettings();
 });
 
-async function initializePopup() {
+function initializePopup() {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    currentUrl = tab.url;
-    currentDomain = new URL(tab.url).hostname;
-    
-    websiteName.textContent = currentDomain;
-    websiteStatus.textContent = '✓ Ready';
-    
-    // Check if we have cached coupons
-    const cached = await getCachedCoupons(currentDomain);
-    if (cached) {
-      displayCoupons(cached);
-      websiteStatus.textContent = '📦 Cached';
-    }
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs[0]) {
+        const tab = tabs[0];
+        currentUrl = tab.url;
+        currentDomain = new URL(tab.url).hostname;
+        
+        websiteName.textContent = currentDomain;
+        websiteStatus.textContent = '✓ Ready';
+      }
+    });
   } catch (error) {
     console.error('Error initializing popup:', error);
     websiteName.textContent = 'Error';
@@ -54,7 +51,7 @@ function setupEventListeners() {
   retryBtn.addEventListener('click', searchCoupons);
 }
 
-async function searchCoupons() {
+function searchCoupons() {
   if (!currentDomain) {
     showError('Unable to detect website');
     return;
@@ -63,35 +60,45 @@ async function searchCoupons() {
   showLoading();
   websiteStatus.textContent = '🔍 Searching...';
   
-  try {
-    // Get settings
-    const settings = await getSettings();
+  // Send message to background script with a timeout
+  chrome.runtime.sendMessage({
+    action: 'fetchCoupons',
+    domain: currentDomain,
+    url: currentUrl,
+    aiProvider: 'google'
+  }, (response) => {
+    // Check for errors
+    if (chrome.runtime.lastError) {
+      console.error('Runtime error:', chrome.runtime.lastError);
+      showError('Error: ' + chrome.runtime.lastError.message);
+      websiteStatus.textContent = '✕ Error';
+      return;
+    }
     
-    // Call background script to fetch coupons
-    const coupons = await chrome.runtime.sendMessage({
-      action: 'fetchCoupons',
-      domain: currentDomain,
-      url: currentUrl,
-      aiProvider: settings.aiProvider,
-      ollamaUrl: settings.ollamaUrl
-    });
+    if (!response) {
+      console.error('No response from background');
+      showError('No response from extension');
+      websiteStatus.textContent = '✕ Error';
+      return;
+    }
     
+    if (response.error) {
+      console.error('Background error:', response.error);
+      showError(response.error);
+      websiteStatus.textContent = '✕ Error';
+      return;
+    }
+    
+    // Success - display coupons
+    const coupons = response;
     if (coupons && coupons.length > 0) {
-      // Cache the results
-      if (settings.enableCache) {
-        await cacheCoupons(currentDomain, coupons);
-      }
       displayCoupons(coupons);
       websiteStatus.textContent = '✓ Found ' + coupons.length;
     } else {
       showEmpty();
-      websiteStatus.textContent = '○ None found';
+      websiteStatus.textContent = '∘ None found';
     }
-  } catch (error) {
-    console.error('Error searching coupons:', error);
-    showError(error.message || 'Failed to search for coupons');
-    websiteStatus.textContent = '✕ Error';
-  }
+  });
 }
 
 function displayCoupons(coupons) {
@@ -221,48 +228,5 @@ function saveSettings() {
     setTimeout(() => {
       saveBtn.textContent = original;
     }, 2000);
-  });
-}
-
-function getSettings() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get([
-      'aiProvider',
-      'ollamaUrl',
-      'enableCache',
-      'autoSearch'
-    ], (result) => {
-      resolve({
-        aiProvider: result.aiProvider || 'google',
-        ollamaUrl: result.ollamaUrl || 'http://localhost:11434',
-        enableCache: result.enableCache !== false,
-        autoSearch: result.autoSearch || false
-      });
-    });
-  });
-}
-
-// Caching
-function getCachedCoupons(domain) {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(`coupons_${domain}`, (result) => {
-      const cached = result[`coupons_${domain}`];
-      if (cached && cached.timestamp > Date.now() - (24 * 60 * 60 * 1000)) {
-        resolve(cached.coupons);
-      } else {
-        resolve(null);
-      }
-    });
-  });
-}
-
-function cacheCoupons(domain, coupons) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set({
-      [`coupons_${domain}`]: {
-        coupons: coupons,
-        timestamp: Date.now()
-      }
-    }, resolve);
   });
 }
